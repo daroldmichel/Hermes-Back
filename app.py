@@ -3,7 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_httpauth import HTTPBasicAuth, HTTPTokenAuth
 
-from objetos import Usuario
+from objetos import Usuario, Cliente, Banco, ClienteUsuario
 
 app = Flask(__name__)
 
@@ -15,28 +15,14 @@ migrate = Migrate(app, db)
 basic_auth = HTTPBasicAuth()
 token_auth = HTTPTokenAuth(scheme='Bearer')
 
-tokens = {
-    "abracadabra": "abracadabra"
-}
 
 @basic_auth.verify_password
 def verify_password(username, password):
-    user = db.session.query(Usuario).filter(Usuario.login == username).filter(Usuario.ativo == True).all()
-    if user:
-        usuario_login = Usuario.query.get_or_404(user[0].idusuario)
-        usuario_login.decriptar()
-
-        return usuario_login.logar(password)
+    return Usuario.logar(username, password)
 
 @token_auth.verify_token
 def verify_token(token):
-    usuario_login = db.session.query(Usuario).filter(Usuario.token == token).filter(Usuario.ativo == True).all()
-    if usuario_login:
-        tokens = {
-            usuario_login[0].token: usuario_login[0].login
-        }
-        if token in tokens:
-            return tokens[token]
+    return Usuario.verificar_token(token)
 
 @app.route('/login')
 @basic_auth.login_required
@@ -51,29 +37,20 @@ def usuario():
         if request.is_json:
             data = request.get_json()
             novo_usuario = Usuario(nomeusuario=data['nomeusuario'], login=data['login'], senha=data['senha'], telefone=data['telefone'], email=data['email'], ativo=data['ativo'])
-            novo_usuario.criptar()
-            novo_usuario.cadastrar()
-            return {"error": f"Usuario {novo_usuario.nomeusuario} Cadastrado com Sucesso."}
+            msg = novo_usuario.cadastrar()
+            if msg:
+                return {"Erro": f"Falha ao cadastrar usuário: {novo_usuario.nomeusuario}. Mensagem de erro: {msg}"}, 418
+            else:
+                return {"Sucesso": f"Usuario {novo_usuario.nomeusuario} Cadastrado com Sucesso."}
         else:
-            return {"error": "The request payload is not in JSON format"}
+            return {"Erro": "Formato invalido, enviar no formato JSON"}, 415
 
     elif request.method == 'GET':
         usuarios = Usuario.query.all()
         results = [
-            {
-                "idusuario": usuario.idusuario,
-                "nomeusuario": usuario.nomeusuario,
-                "login": usuario.login,
-                "senha": usuario.senha,
-                "keysenha": usuario.keysenha,
-                "telefone": usuario.telefone,
-                "email": usuario.email,
-                "token": usuario.token,
-                "ativo": usuario.ativo
+            usuario.imprimir() for usuario in usuarios]
 
-            } for usuario in usuarios]
-
-        return {"count": len(results), "usuarios": results}
+        return {"Sucesso": len(results), "usuarios": results}
 
 
 @app.route('/usuario/<usuario_id>', methods=['GET', 'PUT', 'DELETE'])
@@ -81,19 +58,8 @@ def usuario_especifico(usuario_id):
     usuario_escolhido = Usuario.query.get_or_404(usuario_id)
     usuario_escolhido.decriptar()
     if request.method == 'GET':
-        response = {
-            "idusuario": usuario_escolhido.idusuario,
-            "nomeusuario": usuario_escolhido.nomeusuario,
-            "login": usuario_escolhido.login,
-            "senha": usuario_escolhido.senha,
-            "keysenha": usuario_escolhido.keysenha,
-            "telefone": usuario_escolhido.telefone,
-            "email": usuario_escolhido.email,
-            "token": usuario_escolhido.token,
-            "ativo": usuario_escolhido.ativo,
-            "senhasemcripto": usuario_escolhido.senhasemcripto
-        }
-        return {"message": "success", "car": response}
+        response = usuario_escolhido.imprimir()
+        return {"Sucesso": "1", "usuario": response}
 
     elif request.method == 'PUT':
         data = request.get_json()
@@ -106,17 +72,177 @@ def usuario_especifico(usuario_id):
         usuario_escolhido.token = data['token']
         usuario_escolhido.ativo = data['ativo']
 
-        usuario_escolhido.atualizar()
-        return {"message": f"Usuário {usuario_escolhido.nomeusuario} Atualizado com Sucesso"}
-
+        msg = usuario_escolhido.atualizar()
+        if msg:
+            return {"Erro": f"Falha ao atualizar usuário: {usuario_escolhido.nomeusuario}. Mensagem de erro: {msg}"}, 418
+        else:
+            return {"Sucesso": f"Usuario {usuario_escolhido.nomeusuario} Atualizado com Sucesso."}
     elif request.method == 'DELETE':
         usuario_escolhido.deletar()
-        return {"message": f"Car {usuario_escolhido.nomeusuario} successfully deleted."}
+        return {"Sucesso": f"Usuario {usuario_escolhido.nomeusuario} Deletado com sucesso."}
+
+@app.route('/cliente', methods=['POST', 'GET'])
+@token_auth.login_required
+def cliente():
+    if request.method == 'POST':
+        if request.is_json:
+            data = request.get_json()
+            novo_cliente = Cliente(nomecliente=data['nomecliente'], cnpj=data['cnpj'], ie=data['ie'], telefone=data['telefone'], uf=data['uf'], endereco=data['endereco'], numero=data['numero'], ativo=data['ativo'], cep=data['cep'])
+            msg = novo_cliente.cadastrar()
+            if msg:
+                return {"Erro": f"Falha ao cadastrar cliente: {novo_cliente.nomecliente}. Mensagem de erro: {msg}"}, 418
+            else:
+                return {"Sucesso": f"Cliente {novo_cliente.nomecliente} Cadastrado com Sucesso."}
+        else:
+            return {"Erro": "Formato invalido, enviar no formato JSON"}, 415
+
+    elif request.method == 'GET':
+        clientes = Cliente.query.all()
+        results = [
+            cliente.imprimir() for cliente in clientes]
+
+        return {"Sucesso": len(results), "cliente": results}
 
 
-@app.route('/')
+@app.route('/cliente/<cliente_id>', methods=['GET', 'PUT', 'DELETE'])
+def cliente_especifico(cliente_id):
+    cliente_escolhido = Cliente.query.get_or_404(cliente_id)
+    if request.method == 'GET':
+        response = cliente_escolhido.imprimir()
+        return {"Sucesso": "1", "cliente": response}
+
+    elif request.method == 'PUT':
+        data = request.get_json()
+        cliente_escolhido.nomecliente = data['nomecliente']
+        cliente_escolhido.cnpj = data['cnpj']
+        cliente_escolhido.ie = data['ie']
+        cliente_escolhido.telefone = data['telefone']
+        cliente_escolhido.uf = data['uf']
+        cliente_escolhido.endereco = data['endereco']
+        cliente_escolhido.numero = data['numero']
+        cliente_escolhido.ativo = data['ativo']
+        cliente_escolhido.cep = data['cep']
+
+        msg = cliente_escolhido.atualizar()
+        if msg:
+            return {"Erro": f"Falha ao atualizar cliente: {cliente_escolhido.nomecliente}. Mensagem de erro: {msg}"}, 418
+        else:
+            return {"Sucesso": f"Cliente {cliente_escolhido.nomecliente} Atualizado com Sucesso."}
+    elif request.method == 'DELETE':
+        cliente_escolhido.deletar()
+        return {"Sucesso": f"Cliente {cliente_escolhido.nomecliente} Deletado com sucesso."}
+
+
+@app.route('/banco', methods=['POST', 'GET'])
+@token_auth.login_required
+def banco():
+    if request.method == 'POST':
+        if request.is_json:
+            data = request.get_json()
+            novo_banco = Banco(nomebanco=data['nomebanco'], protocolo=data['protocolo'], ip=data['ip'], porta=data['porta'], ativo=data['ativo'], usuario=data['usuario'], senha=data['senha'], tls=data['tls'], idcliente=data['idcliente'])
+            novo_banco.criptar()
+            msg = novo_banco.cadastrar()
+            if msg:
+                return {"Erro": f"Falha ao cadastrar banco: {novo_banco.nomebanco}. Mensagem de erro: {msg}"}, 418
+            else:
+                return {"Sucesso": f"Banco {novo_banco.nomebanco} Cadastrado com Sucesso."}
+        else:
+            return {"Erro": "Formato invalido, enviar no formato JSON"}, 415
+
+    elif request.method == 'GET':
+        bancos = Banco.query.all()
+        results = [
+            banco.imprimir() for banco in bancos]
+
+        return {"Sucesso": len(results), "bancos": results}
+
+
+@app.route('/banco/<banco_id>', methods=['GET', 'PUT', 'DELETE'])
+def banco_especifico(banco_id):
+    banco_escolhido = Banco.query.get_or_404(banco_id)
+    banco_escolhido.decriptar()
+    if request.method == 'GET':
+        response = banco_escolhido.imprimir()
+        return {"Sucesso": "1", "Banco": response}
+
+    elif request.method == 'PUT':
+        data = request.get_json()
+        banco_escolhido.nomebanco = data['nomebanco']
+        banco_escolhido.protocolo = data['protocolo']
+        banco_escolhido.ip = data['ip']
+        banco_escolhido.porta = data['porta']
+        banco_escolhido.ativo = data['ativo']
+        banco_escolhido.usuario = data['usuario']
+        banco_escolhido.senha = data['senha']
+        banco_escolhido.keysenha = data['keysenha']
+        banco_escolhido.tls = data['tls']
+        banco_escolhido.idcliente = data['idcliente']
+
+        msg = banco_escolhido.atualizar()
+        if msg:
+            return {"Erro": f"Falha ao atualizar banco: {banco_escolhido.nomebanco}. Mensagem de erro: {msg}"}, 418
+        else:
+            return {"Sucesso": f"Banco {banco_escolhido.nomebanco} Atualizado com Sucesso."}
+    elif request.method == 'DELETE':
+        banco_escolhido.deletar()
+        return {"Sucesso": f"Usuario {banco_escolhido.nomebanco} Deletado com sucesso."}
+
+@app.route('/cliente-usuario', methods=['POST', 'GET'])
+@token_auth.login_required
+def clienteUsuario():
+    if request.method == 'POST':
+        if request.is_json:
+            data = request.get_json()
+            novo_cliente_usuario = ClienteUsuario(idcliente=data['idcliente'], idusuario=data['idusuario'])
+            msg = novo_cliente_usuario.cadastrar()
+            if msg:
+                return {"Erro": f"Falha ao relacionar cliente: {novo_cliente_usuario.idcliente}, ao usuário: {novo_cliente_usuario.idusuario}. Mensagem de erro: {msg}"}, 418
+            else:
+                return {"Sucesso": f"Relacionamento cliente: {novo_cliente_usuario.idcliente}, ao usuário: {novo_cliente_usuario.idusuario} Cadastrado com Sucesso."}
+        else:
+            return {"Erro": "Formato invalido, enviar no formato JSON"}, 415
+
+    elif request.method == 'GET':
+        cliente_usuarios = ClienteUsuario.query.all()
+        results = [
+            cliente_usuario.imprimir() for cliente_usuario in cliente_usuarios]
+
+        return {"Sucesso": len(results), "relacionamentos": results}
+
+
+# @app.route('/banco/<banco_id>', methods=['GET', 'PUT', 'DELETE'])
+# def banco_especifico(banco_id):
+#     banco_escolhido = Banco.query.get_or_404(banco_id)
+#     banco_escolhido.decriptar()
+#     if request.method == 'GET':
+#         response = banco_escolhido.imprimir()
+#         return {"Sucesso": "1", "Banco": response}
+#
+#     elif request.method == 'PUT':
+#         data = request.get_json()
+#         banco_escolhido.nomebanco = data['nomebanco']
+#         banco_escolhido.protocolo = data['protocolo']
+#         banco_escolhido.ip = data['ip']
+#         banco_escolhido.porta = data['porta']
+#         banco_escolhido.ativo = data['ativo']
+#         banco_escolhido.usuario = data['usuario']
+#         banco_escolhido.senha = data['senha']
+#         banco_escolhido.keysenha = data['keysenha']
+#         banco_escolhido.tls = data['tls']
+#         banco_escolhido.idcliente = data['idcliente']
+#
+#         msg = banco_escolhido.atualizar()
+#         if msg:
+#             return {"Erro": f"Falha ao atualizar banco: {banco_escolhido.nomebanco}. Mensagem de erro: {msg}"}, 418
+#         else:
+#             return {"Sucesso": f"Banco {banco_escolhido.nomebanco} Atualizado com Sucesso."}
+#     elif request.method == 'DELETE':
+#         banco_escolhido.deletar()
+#         return {"Sucesso": f"Usuario {banco_escolhido.nomebanco} Deletado com sucesso."}
+
+@app.route('/status')
 def hello_world():
-    return 'Hello World!'
+    return 'OK!'
 
 
 if __name__ == '__main__':
