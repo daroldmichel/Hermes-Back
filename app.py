@@ -139,7 +139,7 @@ def banco():
     if request.method == 'POST':
         if request.is_json:
             data = request.get_json()
-            novo_banco = Banco(nomebanco=data['nomebanco'], protocolo=data['protocolo'], ip=data['ip'], porta=data['porta'], ativo=data['ativo'], usuario=data['usuario'], senha=data['senha'], tls=data['tls'], idcliente=data['idcliente'])
+            novo_banco = Banco(nomebanco=data['nomebanco'], protocolo=data['protocolo'], ip=data['ip'], porta=data['porta'], ativo=data['ativo'], usuario=data['usuario'], senha=data['senha'], tls=data['tls'], tipo=data['tipo'], idcliente=data['idcliente'])
             novo_banco.criptar()
             msg = novo_banco.cadastrar()
             if msg:
@@ -163,6 +163,8 @@ def banco_especifico(banco_id):
     banco_escolhido.decriptar()
     if request.method == 'GET':
         response = banco_escolhido.imprimir()
+        print(response)
+        banco_escolhido.verificar_status()
         return {"Sucesso": "1", "Banco": response}
 
     elif request.method == 'PUT':

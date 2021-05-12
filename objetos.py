@@ -1,6 +1,9 @@
 from flask_sqlalchemy import SQLAlchemy
 from cryptography.fernet import Fernet
 
+import psycopg2
+import ibm_db
+
 db = SQLAlchemy()
 
 
@@ -170,7 +173,7 @@ class Banco(db.Model):
 
     idbanco = db.Column(db.Integer, primary_key=True)
     nomebanco = db.Column(db.VARCHAR(60))
-    protocolo = db.Column(db.VARCHAR(60))
+    protocolo = db.Column(db.VARCHAR(60), default='TCPIP')
     ip = db.Column(db.VARCHAR(100))
     porta = db.Column(db.VARCHAR(7))
     ativo = db.Column(db.Boolean(), default=True)
@@ -178,12 +181,13 @@ class Banco(db.Model):
     senha = db.Column(db.VARCHAR(300))
     keysenha = db.Column(db.VARCHAR(300))
     tls = db.Column(db.Boolean(), default=False)
+    tipo = db.Column(db.Integer, default=1)
     idcliente = db.Column(db.Integer, db.ForeignKey('dba.cliente.idcliente'))
     cliente = db.relationship("Cliente")
 
     senhasemcripto = ''
 
-    def __init__(self, nomebanco, protocolo, ip, porta, ativo, usuario, senha, tls, idcliente):
+    def __init__(self, nomebanco, protocolo, ip, porta, ativo, usuario, senha, tls, tipo, idcliente):
         self.nomebanco = nomebanco
         self.protocolo = protocolo
         self.ip = ip
@@ -192,6 +196,7 @@ class Banco(db.Model):
         self.usuario = usuario
         self.senhasemcripto = senha
         self.tls = tls
+        self.tipo = tipo
         self.idcliente = idcliente
 
     def __repr__(self):
@@ -235,8 +240,29 @@ class Banco(db.Model):
             "senha": self.senha,
             "keysenha": self.keysenha,
             "tls": self.tls,
+            "tipo": self.tipo,
             "idcliente": self.idcliente
         }
+
+    def verificar_status(self):
+        self.decriptar()
+        if self.tipo == 2:
+            try:
+                conection = psycopg2.connect(f'host={self.ip} user={self.usuario} dbname={self.nomebanco} port={self.porta} password={self.senhasemcripto}')
+                conection.close()
+                return
+            except Exception as e:
+                print(e)
+                return e
+        else:
+            try:
+                conection = ibm_db.connect(f'DATABASE={self.nomebanco};HOSTNAME={self.ip};PORT={self.porta};PROTOCOL={self.protocolo};UID={self.usuario};PWD={self.senhasemcripto};', '', '')
+                ibm_db.close(conection)
+                return
+            except Exception as e:
+                print(ibm_db.conn_errormsg())
+                return e
+
 
 class ClienteUsuario(db.Model):
     __tablename__ = 'relacionamento_cliente_usuario'
@@ -268,3 +294,14 @@ class ClienteUsuario(db.Model):
             "idcliente": self.idcliente,
             "idusuario": self.idusuario
         }
+
+class StatusMonitoramento(db.Model):
+    __tablename__ = 'status_monitoramento'
+    __table_args__ = {"schema": "dba"}
+
+    idstatus = db.Column(db.Integer, primary_key=True)
+    descricaostatus = db.Column(db.VARCHAR(60))
+
+    def __init__(self, idstatus, descricaostatus):
+        self.idstatus = idstatus
+        self.descricaostatus = descricaostatus
