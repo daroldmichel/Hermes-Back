@@ -1,5 +1,6 @@
 from flask_sqlalchemy import SQLAlchemy
 from cryptography.fernet import Fernet
+from datetime import datetime
 
 import psycopg2
 import ibm_db
@@ -65,12 +66,9 @@ class Usuario(db.Model):
         db.session.commit()
 
     def atualizar(self):
-        msg = self.validar_login()
-        if msg:
-            return msg
-
         if not self.ativo:
             self.token = None
+        self.criptar()
         db.session.add(self)
         db.session.commit()
 
@@ -187,7 +185,7 @@ class Banco(db.Model):
 
     senhasemcripto = ''
 
-    def __init__(self, nomebanco, protocolo, ip, porta, ativo, usuario, senha, tls, tipo, idcliente):
+    def __init__(self, nomebanco, protocolo, ip, porta, ativo, usuario, senha, tls, tipo):
         self.nomebanco = nomebanco
         self.protocolo = protocolo
         self.ip = ip
@@ -197,7 +195,6 @@ class Banco(db.Model):
         self.senhasemcripto = senha
         self.tls = tls
         self.tipo = tipo
-        self.idcliente = idcliente
 
     def __repr__(self):
         return f"<Banco {self.nomebanco}>"
@@ -221,6 +218,7 @@ class Banco(db.Model):
         db.session.commit()
 
     def atualizar(self):
+        self.criptar()
         db.session.add(self)
         db.session.commit()
 
@@ -237,31 +235,53 @@ class Banco(db.Model):
             "porta": self.porta,
             "ativo": self.ativo,
             "usuario": self.usuario,
-            "senha": self.senha,
-            "keysenha": self.keysenha,
+            "senha": self.senhasemcripto,
             "tls": self.tls,
             "tipo": self.tipo,
             "idcliente": self.idcliente
         }
 
     def verificar_status(self):
+        erro = ''
         self.decriptar()
         if self.tipo == 2:
             try:
                 conection = psycopg2.connect(f'host={self.ip} user={self.usuario} dbname={self.nomebanco} port={self.porta} password={self.senhasemcripto}')
                 conection.close()
-                return
+                erro = ''
             except Exception as e:
                 print(e)
-                return e
+                erro = str(e)
         else:
             try:
                 conection = ibm_db.connect(f'DATABASE={self.nomebanco};HOSTNAME={self.ip};PORT={self.porta};PROTOCOL={self.protocolo};UID={self.usuario};PWD={self.senhasemcripto};', '', '')
                 ibm_db.close(conection)
-                return
+                erro = ''
             except Exception as e:
                 print(ibm_db.conn_errormsg())
-                return e
+                erro = str(e)
+        if erro == '':
+            status = 1
+        else:
+            status = 2
+        monitoramento = db.session.query(Monitoramento).filter(Monitoramento.idbanco == self.idbanco).order_by(
+            Monitoramento.idmonitoramento.desc()).first()
+
+        if monitoramento and monitoramento.idstatus == status:
+            monitoramento.dtmonitoramento = datetime.now()
+            if status == 2:
+                monitoramento.observacao = erro
+            monitoramento.atualizar()
+        elif monitoramento and monitoramento.idstatus != status:
+            monitoramento.dhfinal = datetime.now()
+            monitoramento.atualizar()
+            monitoramento_novo = Monitoramento(self.idbanco, datetime.now(), status, datetime.now(), erro)
+            monitoramento_novo.atualizar()
+        else:
+            monitoramento_novo = Monitoramento(self.idbanco, datetime.now(), status, datetime.now(), erro)
+            monitoramento_novo.atualizar()
+
+
 
 
 class ClienteUsuario(db.Model):
@@ -305,3 +325,51 @@ class StatusMonitoramento(db.Model):
     def __init__(self, idstatus, descricaostatus):
         self.idstatus = idstatus
         self.descricaostatus = descricaostatus
+
+
+class Monitoramento(db.Model):
+    __tablename__ = 'monitoramento'
+    __table_args__ = {"schema": "dba"}
+
+    idmonitoramento = db.Column(db.Integer, primary_key=True)
+    idbanco = db.Column(db.Integer, db.ForeignKey('dba.banco.idbanco'))
+    dtmonitoramento = db.Column(db.DateTime)
+    idstatus = db.Column(db.Integer, db.ForeignKey('dba.status_monitoramento.idstatus'))
+    dhinicial = db.Column(db.DateTime)
+    dhfinal = db.Column(db.DateTime)
+    observacao = db.Column(db.Text)
+    idusuarioalocado = db.Column(db.Integer, db.ForeignKey('dba.usuario.idusuario'))
+    banco = db.relationship("Banco")
+    status = db.relationship("StatusMonitoramento")
+    usuario = db.relationship("Usuario")
+
+    def __init__(self, idbanco, dtmonitoramento, idstatus, dhinicial, observaocao):
+        self.idbanco = idbanco
+        self.dtmonitoramento = dtmonitoramento
+        self.idstatus = idstatus,
+        self.dhinicial = dhinicial,
+        self.observacao = observaocao
+
+    def cadastrar(self):
+        db.session.add(self)
+        db.session.commit()
+
+    def atualizar(self):
+        db.session.add(self)
+        db.session.commit()
+
+    def deletar(self):
+        db.session.delete(self)
+        db.session.commit()
+
+    def imprimir(self):
+        return {
+            "idmonitoramento": self.idmonitoramento,
+            "idbanco": self.idbanco,
+            "dtmonitoramento": self.dtmonitoramento,
+            "idstatus": self.idstatus,
+            "dhinicial": self.dhinicial,
+            "dhfinal": self.dhfinal,
+            "observacao": self.observacao
+
+        }
