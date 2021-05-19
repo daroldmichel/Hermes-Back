@@ -6,9 +6,12 @@ from flask_httpauth import HTTPBasicAuth, HTTPTokenAuth
 from objetos import Usuario, Cliente, Banco, ClienteUsuario, Monitoramento
 
 app = Flask(__name__)
+url = "postgresql://postgres:postgres@localhost:5432/hermes"
 
-app.config['SQLALCHEMY_DATABASE_URI'] = "postgresql://postgres:postgres@localhost:5432/hermes"
+app.config['SQLALCHEMY_DATABASE_URI'] = url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_POOL_SIZE'] = 9999999999
+app.config['SQLALCHEMY_ECHO'] = True
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 
@@ -44,7 +47,7 @@ def usuario():
             return {"Erro": "Formato invalido, enviar no formato JSON"}, 415
 
     elif request.method == 'GET':
-        usuarios = Usuario.query.all()
+        usuarios = Usuario.query.order_by(Usuario.idusuario).all()
         results = [
             usuario.imprimir() for usuario in usuarios]
 
@@ -106,12 +109,20 @@ def cliente():
             return {"Erro": "Formato invalido, enviar no formato JSON"}, 415
 
     elif request.method == 'GET':
-        clientes = Cliente.query.all()
+        clientes = Cliente.query.order_by(Cliente.idcliente).all()
         results = [
             cliente.imprimir() for cliente in clientes]
 
-        return {"Sucesso": len(results), "cliente": results}
+        return {"Sucesso": len(results), "clientes": results}
 
+@app.route('/cliente/ativos', methods=['GET'])
+@token_auth.login_required
+def cliente_ativos():
+    clientes = Cliente.query.filter(Cliente.ativo==True).order_by(Cliente.nomecliente).all()
+    results = [
+        cliente.imprimir() for cliente in clientes]
+
+    return {"Sucesso": len(results), "clientes": results}
 
 @app.route('/cliente/<cliente_id>', methods=['GET', 'PUT', 'DELETE'])
 @token_auth.login_required
@@ -149,7 +160,7 @@ def banco():
     if request.method == 'POST':
         if request.is_json:
             data = request.get_json()
-            novo_banco = Banco(nomebanco=data['nomebanco'], protocolo=data['protocolo'], ip=data['ip'], porta=data['porta'], ativo=data['ativo'], usuario=data['usuario'], senha=data['senha'], tls=data['tls'], tipo=data['tipo'])
+            novo_banco = Banco(nomebanco=data['nomebanco'], protocolo=data['protocolo'], ip=data['ip'], porta=data['porta'], ativo=data['ativo'], usuario=data['usuario'], senha=data['senha'], tls=data['tls'], tipo=data['tipo'], idcliente=data['idcliente'])
             novo_banco.criptar()
             msg = novo_banco.cadastrar()
             if msg:
@@ -160,7 +171,7 @@ def banco():
             return {"Erro": "Formato invalido, enviar no formato JSON"}, 415
 
     elif request.method == 'GET':
-        bancos = Banco.query.all()
+        bancos = Banco.query.order_by(Banco.idbanco).all()
         results = [
             banco.imprimir() for banco in bancos]
 
@@ -186,6 +197,7 @@ def banco_especifico(banco_id):
         banco_escolhido.usuario = data['usuario']
         banco_escolhido.senhasemcripto = data['senha']
         banco_escolhido.tls = data['tls']
+        banco_escolhido.idcliente = data['idcliente']
 
         msg = banco_escolhido.atualizar()
         if msg:
@@ -195,6 +207,15 @@ def banco_especifico(banco_id):
     elif request.method == 'DELETE':
         banco_escolhido.deletar()
         return {"Sucesso": f"Usuario {banco_escolhido.nomebanco} Deletado com sucesso."}
+
+@app.route('/historico_banco', methods=['GET'])
+@token_auth.login_required
+def historico_banco():
+    bancos = Banco.query.order_by(Banco.idbanco).all()
+    results = [
+        banco.imprimir_monitoramento() for banco in bancos]
+
+    return {"Sucesso": len(results), "bancos": results}
 
 @app.route('/cliente-usuario', methods=['POST', 'GET'])
 @token_auth.login_required
@@ -221,15 +242,15 @@ def clienteUsuario():
 @app.route('/monitoramento', methods=['GET'])
 @token_auth.login_required
 def monitoramento():
-    monitoramentos = db.session.query(Monitoramento).filter(Monitoramento.idstatus == 2).filter(Monitoramento.idusuarioalocado == None).order_by(
-        Monitoramento.idmonitoramento).all()
+
+    monitoramentos = db.session.query(Monitoramento).filter(Monitoramento.idstatus == 2).filter(Monitoramento.idusuarioalocado == None).filter(Monitoramento.dhfinal == None).order_by(Monitoramento.idmonitoramento).all()
     results = [
         monitoramento.imprimir() for monitoramento in monitoramentos]
 
     return {"Sucesso": len(results), "monitoramentos": results}
 
 
-@app.route('/monitoramento/<monitoramento_id>', methods=['GET', 'PUT'])
+@app.route('/monitoramento/<monitoramento_id>', methods=['PUT'])
 @token_auth.login_required
 def monitoramento_especifico(monitoramento_id):
     monitoramento = Monitoramento.query.get_or_404(monitoramento_id)
@@ -241,6 +262,7 @@ def monitoramento_especifico(monitoramento_id):
         data = request.get_json()
         monitoramento.idusuarioalocado = data['idusuarioalocado']
         msg = monitoramento.atualizar()
+
         if msg:
             return {"Erro": f"Falha ao atualizar Monitoramento"}, 418
         else:

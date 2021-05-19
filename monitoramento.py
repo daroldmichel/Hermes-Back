@@ -9,16 +9,16 @@ app = Flask(__name__)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = "postgresql://postgres:postgres@localhost:5432/hermes"
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db = SQLAlchemy(app)
+db = SQLAlchemy(app, session_options={'autocommit': True})
 migrate = Migrate(app, db)
 
 @app.route('/monitoramento')
 def monitoramento():
-    bancos = Banco.query.all()
+    bancos = Banco.query.filter(Banco.ativo == True).order_by(Banco.idbanco).all()
     results = [
         banco.verificar_status() for banco in bancos]
 
     return 'OK', 200
 
 if __name__ == '__main__':
-    app.run(host="localhost", port=8000, debug=True)
+    app.run(host="localhost", port=4999)

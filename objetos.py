@@ -185,7 +185,7 @@ class Banco(db.Model):
 
     senhasemcripto = ''
 
-    def __init__(self, nomebanco, protocolo, ip, porta, ativo, usuario, senha, tls, tipo):
+    def __init__(self, nomebanco, protocolo, ip, porta, ativo, usuario, senha, tls, tipo, idcliente):
         self.nomebanco = nomebanco
         self.protocolo = protocolo
         self.ip = ip
@@ -195,6 +195,7 @@ class Banco(db.Model):
         self.senhasemcripto = senha
         self.tls = tls
         self.tipo = tipo
+        self.idcliente = idcliente
 
     def __repr__(self):
         return f"<Banco {self.nomebanco}>"
@@ -241,6 +242,25 @@ class Banco(db.Model):
             "idcliente": self.idcliente
         }
 
+    def imprimir_monitoramento(self):
+        monitoramentos = db.session.query(Monitoramento).filter(Monitoramento.idbanco == self.idbanco).order_by(Monitoramento.idmonitoramento).all()
+        historico = [
+            monitoramento.imprimir() for monitoramento in monitoramentos]
+        return {
+            "idbanco": self.idbanco,
+            "nomebanco": self.nomebanco,
+            "protocolo": self.protocolo,
+            "ip": self.ip,
+            "porta": self.porta,
+            "ativo": self.ativo,
+            "usuario": self.usuario,
+            "senha": self.senhasemcripto,
+            "tls": self.tls,
+            "tipo": self.tipo,
+            "idcliente": self.idcliente,
+            "monitoramento": historico
+        }
+
     def verificar_status(self):
         erro = ''
         self.decriptar()
@@ -266,7 +286,6 @@ class Banco(db.Model):
             status = 2
         monitoramento = db.session.query(Monitoramento).filter(Monitoramento.idbanco == self.idbanco).order_by(
             Monitoramento.idmonitoramento.desc()).first()
-
         if monitoramento and monitoramento.idstatus == status:
             monitoramento.dtmonitoramento = datetime.now()
             if status == 2:
@@ -357,19 +376,29 @@ class Monitoramento(db.Model):
     def atualizar(self):
         db.session.add(self)
         db.session.commit()
+        db.session.flush()
 
     def deletar(self):
         db.session.delete(self)
         db.session.commit()
 
     def imprimir(self):
+        dhfinal = ''
+        if(self.dhfinal):
+            dhfinal = self.dhfinal.strftime('%d/%m/%Y %H:%M')
+
+        usuario = ''
+        if(self.usuario):
+            usuario = self.usuario.nomeusuario
         return {
             "idmonitoramento": self.idmonitoramento,
-            "idbanco": self.idbanco,
-            "dtmonitoramento": self.dtmonitoramento,
+            "banco": self.banco.imprimir(),
+            "dtmonitoramento": self.dtmonitoramento.strftime('%d/%m/%Y %H:%M'),
             "idstatus": self.idstatus,
-            "dhinicial": self.dhinicial,
-            "dhfinal": self.dhfinal,
-            "observacao": self.observacao
+            "status": self.status.descricaostatus,
+            "dhinicial": self.dhinicial.strftime('%d/%m/%Y %H:%M'),
+            "dhfinal": dhfinal,
+            "observacao": self.observacao,
+            "usuario": usuario
 
         }
